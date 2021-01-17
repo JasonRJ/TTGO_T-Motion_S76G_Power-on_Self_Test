@@ -32,7 +32,7 @@
 #define SSD1306_OLED_I2C_ADDR 0x3C
 #define BMP085_I2CADDR        0x77
 #define BMP280_ADDRESS        0x77
-#define BMP280_ADDRESS_ALT    0x76 /* GY-91, SA0 is NC */
+#define BMP280_ADDRESS_ALT    0x76 // GY-91, SA0 is NC
 
 #define BMP280_REGISTER_CHIPID 0xD0
 
@@ -43,9 +43,13 @@
 #define Serial                Serial1
 #endif
 
+// T-Motion GPIOs
+#define T_Motion_S76G_CXD5603_1PPS        PB5  // TTGO T-Motion 1PPS
+#define T_Motion_S76G_CXD5603_RESET       PB8  // TTGO T-Motion custom jumper from RB8 to GNSS Reset
+
 // AcSiP S7xx UART1 (Console)
-#define S7xx_CONSOLE_TX                   PA9  // UART1 (CH340E U1)
-#define S7xx_CONSOLE_RX                   PA10 // UART1 (CH340E U1)
+#define S7xx_CONSOLE_TX                   PA9  // UART1
+#define S7xx_CONSOLE_RX                   PA10 // UART1
 
 // AcSiP S7xx Internal SPI2 STM32L073RZ(U|Y)x <--> SX127x
 #define S7xx_SX127x_MOSI                  PB15 // SPI2
@@ -62,9 +66,7 @@
 #define S7xx_SX127x_ANTENNA_SWITCH_RXTX   PA1  // Radio Antenna Switch 1:RX, 0:TX
 
 // AcSiP S7xG SONY CXD5603GF GNSS
-#define RAK7200_S76G_CXD5603_POWER_ENABLE PC4  // Enable 1V8 Power to GNSS (U2 TPS62740)
-#define T_Motion_S76G_CXD5603_1PPS        PB5  // TTGO T-Motion 1PPS
-#define S7xG_CXD5603_RESET                PB2  // Reset does not appear to work
+#define S7xG_CXD5603_RESET                PB2  // Reset does not appear to work -- commented out
 #define S7xG_CXD5603_LEVEL_SHIFTER        PC6
 #define S7xG_CXD5603_UART_TX              PC10 // UART4
 #define S7xG_CXD5603_UART_RX              PC11 // UART4
@@ -81,18 +83,17 @@ U8X8_SSD1306_128X64_NONAME_HW_I2C u8x8_i2c(U8X8_PIN_NONE);
 
 static U8X8_SSD1306_128X64_NONAME_HW_I2C *u8x8 = NULL;
 
-static bool GNSS_probe() {
+static void CXD5603_1PPS_ISR(void) {
+    Serial.println("***  CXD5603_1PPS_ISR  ***");
+}
 
+static bool GNSS_probe() {
     unsigned long startTime = millis();
     char c1, c2;
     c1 = c2 = 0;
 
-    // clean any leftovers
     Serial3.flush();
-
-    // Timeout if no valid response in 3 seconds
     while (millis() - startTime < 3000) {
-
         if (Serial3.available() > 0) {
             c1 = Serial3.read();
             if ((c1 == '$') && (c2 == 0)) {
@@ -100,59 +101,120 @@ static bool GNSS_probe() {
                 continue;
             }
             if ((c2 == '$') && (c1 == 'G')) {
-                /* got $G */
-
-                /* leave the function with GNSS port opened */
+                // got $G leave the function with GNSS port opened
                 return true;
             }
             else {
                 c2 = 0;
             }
         }
-
         delay(1);
     }
-
     return false;
 }
 
 static bool bmp_probe() {
 #if 1
-
     Wire.beginTransmission(BMP280_ADDRESS);
-    if (Wire.endTransmission() == 0) return true;
+    if (Wire.endTransmission() == 0) {
+        return true;
+    }
     Wire.beginTransmission(BMP280_ADDRESS_ALT);
-    if (Wire.endTransmission() == 0) return true;
-
+    if (Wire.endTransmission() == 0) {
+        return true;
+    }
 #else
-
     Wire.beginTransmission(BMP280_ADDRESS);
     Wire.write(BMP280_REGISTER_CHIPID);
     Wire.endTransmission();
     Wire.requestFrom(BMP280_ADDRESS, (byte)1);
-    if (Wire.read() == BMP280_CHIPID) return true;
-
+    if (Wire.read() == BMP280_CHIPID) {
+      return true;
+    }
     Wire.beginTransmission(BMP280_ADDRESS_ALT);
     Wire.write(BMP280_REGISTER_CHIPID);
     Wire.endTransmission();
     Wire.requestFrom(BMP280_ADDRESS_ALT, (byte)1);
-    if (Wire.read() == BMP280_CHIPID) return true;
-
+    if (Wire.read() == BMP280_CHIPID) {
+      return true;
+    }
     Wire.beginTransmission(BMP280_ADDRESS);
     Wire.write(BMP280_REGISTER_CHIPID);
     Wire.endTransmission();
     Wire.requestFrom(BMP280_ADDRESS, (byte)1);
-    if (Wire.read() == BME280_CHIPID) return true;
-
+    if (Wire.read() == BME280_CHIPID) {
+      return true;
+    }
     Wire.beginTransmission(BMP280_ADDRESS_ALT);
     Wire.write(BMP280_REGISTER_CHIPID);
     Wire.endTransmission();
     Wire.requestFrom(BMP280_ADDRESS_ALT, (byte)1);
-    if (Wire.read() == BME280_CHIPID) return true;
-
+    if (Wire.read() == BME280_CHIPID) {
+      return true;
+    }
 #endif
-
     return false;
+}
+
+static void STM32_UID(void) {
+// STM32 unique device ID registers (96-bits)
+#define         UID1                                ( 0x1FF80050 )
+#define         UID2                                ( 0x1FF80054 )
+#define         UID3                                ( 0x1FF80064 )
+
+    char Lot[8] = "";
+    uint32_t uid1 = *(uint32_t * )UID1;
+    uint8_t waffer = *(uint8_t * )(UID1 + 3);
+    Lot[0] = *(uint8_t * )(UID1 + 2);
+    Lot[1] = *(uint8_t * )(UID1 + 1);
+    Lot[2] = *(uint8_t * )UID1;
+    uint32_t uid2 = *(uint32_t * )UID2;
+    Lot[3] = *(uint8_t * )(UID2 + 3);
+    Lot[4] = *(uint8_t * )(UID2 + 2);
+    Lot[5] = *(uint8_t * )(UID2 + 1);
+    Lot[6] = *(uint8_t * )UID2;
+    Lot[7] = 0x00;
+    uint32_t uid3 = *(uint32_t * )UID3;
+
+    Serial.print("\n96-bit Unique ID: ");
+    Serial.print(uid1, HEX);
+    Serial.print(uid2, HEX);
+    //Serial.print(uid3, HEX);
+    Serial.print((*(uint8_t * )(UID3 + 3)) < 16 ? "0" : "");
+    Serial.print(*(uint8_t * )(UID3 + 3), HEX);
+    Serial.print((*(uint8_t * )(UID3 + 2)) < 16 ? "0" : "");
+    Serial.print(*(uint8_t * )(UID3 + 2), HEX);
+    Serial.print((*(uint8_t * )(UID3 + 1)) < 16 ? "0" : "");
+    Serial.print(*(uint8_t * )(UID3 + 1), HEX);
+    Serial.print((*(uint8_t * )(UID3)) < 16 ? "0" : "");
+    Serial.print(*(uint8_t * )(UID3), HEX);
+    Serial.print("\n\n");
+    Serial.print("Waffer:  ");
+    Serial.print(waffer);
+    Serial.print("\n");
+    Serial.print("Lot:     ");
+    Serial.print(Lot);
+    Serial.print("\n");
+    Serial.print("UID:     ");
+    //Serial.print(uid3, HEX);
+    Serial.print((*(uint8_t * )(UID3 + 3)) < 16 ? "0" : "");
+    Serial.print(*(uint8_t * )(UID3 + 3), HEX);
+    Serial.print((*(uint8_t * )(UID3 + 2)) < 16 ? "0" : "");
+    Serial.print(*(uint8_t * )(UID3 + 2), HEX);
+    Serial.print((*(uint8_t * )(UID3 + 1)) < 16 ? "0" : "");
+    Serial.print(*(uint8_t * )(UID3 + 1), HEX);
+    Serial.print((*(uint8_t * )(UID3)) < 16 ? "0" : "");
+    Serial.print(*(uint8_t * )(UID3), HEX);
+    Serial.print("\n");
+
+// STM32 Flash Memory Size
+#define         FLASHSIZE                           ( 0x1FF8007C )
+
+    uint16_t FlashSize = *(uint16_t * )FLASHSIZE;
+
+    Serial.print("\nFlash Size: ");
+    Serial.print(FlashSize);
+    Serial.print("kB\n");
 }
 
 static void scanI2Cbus(void) {
@@ -162,27 +224,31 @@ static void scanI2Cbus(void) {
     Serial.println("Scanning I2C bus");
     for (addr = 1; addr < 127; addr++) {
         Wire.beginTransmission(addr);
-        
         err = Wire.endTransmission();
         if (err == 0) {
             Serial.print("I2C device found at address 0x");
-            Serial.print(addr < 16 ? "0" : "");
-            //if (addr < 16) Serial.print("0");
+            if (addr < 16) {
+                Serial.print("0");
+            }
             Serial.println(addr, HEX);
             nDevices++;
         }
-        else
+        else {
             if (err == 4) {
                 Serial.print("Unknow error at address 0x");
-                Serial.print(addr < 16 ? "0" : "");
-                //if (addr < 16) Serial.print("0");
+                if (addr < 16) {
+                    Serial.print("0");
+                }
                 Serial.println(addr, HEX);
             }
+        }
     }
-    if (nDevices == 0)
+    if (nDevices == 0) {
         Serial.println("No I2C devices found\n");
-    else
+    }
+    else {
         Serial.println("Scanning complete\n");
+    }
 }
 
 static void SerialPassThrough(void) {
@@ -200,11 +266,22 @@ void setup() {
     bool has_GNSS = false;
     bool has_OLED = false;
     bool has_BMP280 = false;
+    time_t serialStart = millis();
 
     Serial.begin(115200);
+    while (!Serial) {
+        if ((millis() - serialStart) < 3000) {
+            delay(100);
+        }
+        else {
+            break;
+        }
+    }
+    delay(2000);
+    STM32_UID();
 
 #if defined(USBD_USE_CDC) && !defined(DISABLE_GENERIC_SERIALUSB)
-    /* Let host's USB and console drivers to warm-up */
+    // Let host's USB and console drivers to warm-up
     delay(2000);
 #else
     delay(500);
@@ -220,7 +297,7 @@ void setup() {
     Wire.setSDA(S7xx_I2C_SDA);
     Wire.begin();
 
-    /* SSD1306 I2C OLED probing */
+    // SSD1306 I2C OLED probing
     Wire.beginTransmission(SSD1306_OLED_I2C_ADDR);
     has_OLED = (Wire.endTransmission() == 0 ? true : false);
 
@@ -281,26 +358,30 @@ void setup() {
 
     Serial3.begin(S7xG_CXD5603_BAUD_RATE);
 
-    /* drive GNSS RST pin low */
-    pinMode(S7xG_CXD5603_RESET, OUTPUT);
-    digitalWrite(S7xG_CXD5603_RESET, LOW);
+    //pinMode(S7xG_CXD5603_RESET, OUTPUT);
+    //digitalWrite(S7xG_CXD5603_RESET, LOW);
 
-    /* activate 1.8V<->3.3V level shifters */
+    // activate 1.8V<->3.3V level shifters
     pinMode(S7xG_CXD5603_LEVEL_SHIFTER, OUTPUT);
     digitalWrite(S7xG_CXD5603_LEVEL_SHIFTER, HIGH);
 
-    /* keep RST low to ensure proper IC reset */
-    delay(200);
+    // keep RST low to ensure proper IC reset
+    //delay(200);
 
-    /* release */
-    digitalWrite(S7xG_CXD5603_RESET, HIGH);
+    // release
+    //digitalWrite(S7xG_CXD5603_RESET, HIGH);
 
-    /* give Sony GNSS few ms to warm up */
+    // give Sony GNSS few ms to warm up
     delay(100);
 
-    /* hot start */
+    // hot start
     Serial3.write("@GSR\r\n");
-    delay(250);
+    Serial.println(Serial3.readStringUntil('\n'));
+    Serial3.write("@VER\r\n");
+    Serial.println(Serial3.readStringUntil('\n'));
+    Serial.println(Serial3.readStringUntil('\n'));
+    Serial3.write("@GPPS 0x1\r\n"); // Enable PPS
+    Serial.println(Serial3.readStringUntil('\n'));
 
     has_GNSS = GNSS_probe();
     Serial.print(F("GNSS   - "));
@@ -345,8 +426,16 @@ void setup() {
     Serial.println();
     Serial.println();
     Serial.println();
+
+    // T-Motion S76G CXD5603 1PPS Interrupt GPIO PB5 (T_Motion_S76G_CXD5603_1PPS)
+    pinMode(T_Motion_S76G_CXD5603_1PPS, INPUT);
+    attachInterrupt(digitalPinToInterrupt(T_Motion_S76G_CXD5603_1PPS), CXD5603_1PPS_ISR, RISING);
+    Serial.println("T-Motion S76G CXD5603 1PPS Interrupt Enabled");
+    Serial.println();
+    Serial.println();
+    Serial.println();
 }
 
 void loop() {
-  SerialPassThrough();
+    SerialPassThrough();
 }
